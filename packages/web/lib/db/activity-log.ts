@@ -20,6 +20,7 @@ export type ActivityAction =
   // An LLM provider/model call failed for a turn (auth, balance, rate limit,
   // model unavailable, network, or an otherwise-unclassified model error).
   | "llm_provider_error"
+  | "agent_failure"
   // An admin moved a user's purchased credit balance by hand — a grant, or a
   // correction. Stripe purchases are not logged here; they live in the
   // CreditTransaction ledger with their Stripe ids attached.
@@ -167,6 +168,34 @@ export function logLlmProviderError(ctx: LlmProviderErrorContext): void {
 
   console.error("[llm-provider-error]", JSON.stringify({ userId: ctx.userId, ...metadata }))
   logActivityAsync(ctx.userId, "llm_provider_error", metadata)
+}
+
+/** Record a process/stream failure once per assistant turn, without raw stderr. */
+export async function logAgentFailure(ctx: LlmProviderErrorContext & { assistantMessageId: string }): Promise<void> {
+  if (!ctx.errorKind || classifyAgentError(ctx.error).category !== "unknown") return
+  const metadata: ActivityMetadata = {
+    chatId: ctx.chatId,
+    agent: ctx.agent,
+    model: ctx.model ?? undefined,
+    source: ctx.source,
+    category: ctx.errorKind,
+    message: ctx.errorKind === "crash"
+      ? "Agent process exited before completing."
+      : "Agent stopped before completing.",
+  }
+  try {
+    await prisma.activityLog.createMany({
+      data: [{
+        id: `agent-failure-${ctx.assistantMessageId}`,
+        userId: ctx.userId,
+        action: "agent_failure",
+        metadata: metadata as Prisma.InputJsonValue,
+      }],
+      skipDuplicates: true,
+    })
+  } catch (error) {
+    console.error("[agent-failure] Failed to log activity:", error)
+  }
 }
 
 /** Cap the error string we persist/print — git error output can be verbose. */

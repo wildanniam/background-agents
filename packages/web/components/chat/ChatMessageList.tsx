@@ -173,7 +173,11 @@ export function ChatMessageList({
               actionPendingLabel="Reloading…"
             />
           )}
-          {chat.status === "error" && chat.errorMessage && (() => {
+          {chat.status === "error" && (() => {
+            const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant")
+            const failure = lastAssistant?.metadata?.failure
+            const message = chat.errorMessage || failure?.message
+            if (!message) return null
             const lastUserMessage = [...chat.messages].reverse().find((m) => m.role === "user")
             const resend = lastUserMessage
               ? () => onSendMessage(
@@ -194,18 +198,17 @@ export function ChatMessageList({
             // "incomplete" means the turn ended with no terminal event: the agent
             // may still be running in the background, so always Reload (refresh
             // history) rather than resending and risking a duplicate run.
-            const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant")
             const recoveredOutput =
               !!lastAssistant?.content?.trim() || (lastAssistant?.toolCalls?.length ?? 0) > 0
             const useReload =
               !!onReload &&
-              (chat.errorKind === "incomplete" ||
-                (chat.errorKind === "crash" && recoveredOutput))
+              ((chat.errorKind ?? failure?.kind) === "incomplete" ||
+                ((chat.errorKind ?? failure?.kind) === "crash" && recoveredOutput))
 
             return (
               <ErrorBanner
                 key={chat.id}
-                message={chat.errorMessage}
+                message={message}
                 isMobile={isMobile}
                 onRetry={useReload ? () => onReload!(chat.id) : resend}
                 actionLabel={useReload ? "Reload" : "Retry"}

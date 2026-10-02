@@ -3,11 +3,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // Mock the prisma singleton so logLlmProviderError can be exercised without a
 // DB. `vi.hoisted` lets the factory (hoisted above imports) see the mock.
 const { activityLog } = vi.hoisted(() => ({
-  activityLog: { create: vi.fn() },
+  activityLog: { create: vi.fn(), createMany: vi.fn() },
 }))
 vi.mock("@/lib/db/prisma", () => ({ prisma: { activityLog } }))
 
-import { logLlmProviderError, logGitPushError } from "./activity-log"
+import { logLlmProviderError, logGitPushError, logAgentFailure } from "./activity-log"
 
 // logActivityAsync is fire-and-forget; flush the microtask queue so the
 // create() call has run before we assert.
@@ -16,6 +16,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 beforeEach(() => {
   activityLog.create.mockReset()
   activityLog.create.mockResolvedValue({})
+  activityLog.createMany.mockReset()
+  activityLog.createMany.mockResolvedValue({ count: 1 })
 })
 
 describe("logLlmProviderError", () => {
@@ -106,5 +108,29 @@ describe("logGitPushError", () => {
     const { data } = activityLog.create.mock.calls[0][0]
     expect(data.metadata.message).toHaveLength(501) // 500 chars + the "…" ellipsis
     expect(data.metadata.message.endsWith("…")).toBe(true)
+  })
+})
+
+describe("logAgentFailure", () => {
+  it("records a process crash once with a stable turn id and no raw stderr", async () => {
+    await logAgentFailure({
+      userId: "u1", chatId: "c1", assistantMessageId: "m1",
+      agent: "eliza", model: "test", source: "stream",
+      error: "Process exited; API_KEY=super-secret-value", errorKind: "crash",
+    })
+    expect(activityLog.createMany).toHaveBeenCalledTimes(1)
+    const { data } = activityLog.createMany.mock.calls[0][0]
+    expect(activityLog.createMany.mock.calls[0][0].skipDuplicates).toBe(true)
+    expect(data[0].id).toBe("agent-failure-m1")
+    expect(data[0].action).toBe("agent_failure")
+    expect(JSON.stringify(data)).not.toContain("super-secret-value")
+  })
+
+  it("does not log a provider auth failure as a generic process failure", async () => {
+    await logAgentFailure({
+      userId: "u1", chatId: "c1", assistantMessageId: "m1",
+      source: "cron-interactive", error: "Invalid API key: 401 Unauthorized", errorKind: "crash",
+    })
+    expect(activityLog.createMany).not.toHaveBeenCalled()
   })
 })

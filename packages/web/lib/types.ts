@@ -63,6 +63,11 @@ export type MessageType = "chat" | "git-operation" | "error"
 /** Action types for git-operation messages */
 export type MessageAction = "force-push" | "view-pr" | "view-branch"
 
+export interface AgentFailure {
+  kind: "crash" | "incomplete" | "agent"
+  message: string
+}
+
 /** Metadata for git-operation messages */
 export interface MessageMetadata {
   /** Action hint for rendering clickable links */
@@ -71,6 +76,8 @@ export interface MessageMetadata {
   prUrl?: string
   /** PR number for view-pr action */
   prNumber?: number
+  /** Durable final error for this assistant turn; does not replace partial output. */
+  failure?: AgentFailure
 }
 
 export interface Message {

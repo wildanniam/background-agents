@@ -155,7 +155,7 @@ export function useChatMessageSync({
             messages: incomingMessages.length > 0
               ? mergeMessages(c.messages, incomingMessages)
               : c.messages,
-            status: "ready",
+            status: chatData.status as Chat["status"],
             uncommittedFilesCount: chatData.uncommittedFilesCount,
             errorMessage: undefined,
           }

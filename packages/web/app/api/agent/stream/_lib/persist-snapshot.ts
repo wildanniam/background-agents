@@ -2,9 +2,13 @@ import { Prisma } from "@prisma/client"
 import type { AgentSnapshot } from "@/lib/agent-session"
 import { stripNullBytes, stripNullBytesDeep } from "@/lib/db/pg-sanitize"
 import type { ActiveTurn } from "@/lib/server/turn-ownership"
+import type { AgentFailure } from "@/lib/types"
 
 type SnapshotStore = {
-  message: { update: (args: Prisma.MessageUpdateArgs) => Promise<unknown> }
+  message: {
+    update: (args: Prisma.MessageUpdateArgs) => Promise<unknown>
+    findUnique: (args: Prisma.MessageFindUniqueArgs) => Promise<{ metadata: Prisma.JsonValue | null } | null>
+  }
   chat: { updateMany: (args: Prisma.ChatUpdateManyArgs) => Promise<{ count: number }> }
 }
 
@@ -18,8 +22,9 @@ export async function persistAgentSnapshot(params: {
   turn: ActiveTurn
   snapshot: AgentSnapshot
   finalizationClaimId?: string
+  failure?: AgentFailure
 }): Promise<{ persisted: boolean }> {
-  const { prisma, turn, snapshot, finalizationClaimId } = params
+  const { prisma, turn, snapshot, finalizationClaimId, failure } = params
   try {
     return await prisma.$transaction(async (tx) => {
       const owned = await tx.chat.updateMany({
@@ -36,6 +41,13 @@ export async function persistAgentSnapshot(params: {
       })
       if (owned.count !== 1) return { persisted: false }
 
+      const existing = failure
+        ? await tx.message.findUnique({ where: { id: turn.assistantMessageId }, select: { metadata: true } })
+        : null
+      const metadata = existing?.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+        ? existing.metadata as Record<string, unknown>
+        : {}
+
       await tx.message.update({
         where: { id: turn.assistantMessageId },
         data: {
@@ -45,6 +57,9 @@ export async function persistAgentSnapshot(params: {
             : undefined,
           contentBlocks: snapshot.contentBlocks.length > 0
             ? (stripNullBytesDeep(snapshot.contentBlocks) as unknown as Prisma.InputJsonValue)
+            : undefined,
+          metadata: failure
+            ? ({ ...metadata, failure } as unknown as Prisma.InputJsonValue)
             : undefined,
         },
       })

@@ -79,6 +79,17 @@ describe("monitorAgent", () => {
     })
     expect(onError).not.toHaveBeenCalled()
   })
+
+  it("does not record a transient snapshot read failure as an agent crash", async () => {
+    snapshot = { ...snapshot, transientReadFailure: true }
+    const onError = vi.fn(async () => {})
+    await monitorAgent(BACKGROUND_SESSION_ID, BACKGROUND_SESSION_ID, daytona, {
+      onComplete: vi.fn(async () => {}),
+      onError,
+    })
+    expect(onError).not.toHaveBeenCalled()
+    expect(cancelBackgroundAgent).not.toHaveBeenCalled()
+  })
 })
 
 describe("stopAgent", () => {

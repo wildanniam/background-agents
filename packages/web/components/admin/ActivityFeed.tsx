@@ -68,6 +68,7 @@ const ACTION_CONFIG: Record<
   admin_promoted: { icon: ShieldCheck, label: "promoted user to admin", color: "text-green-600" },
   admin_demoted: { icon: ShieldOff, label: "removed admin status", color: "text-red-600" },
   llm_provider_error: { icon: AlertTriangle, label: "hit an LLM provider error", color: "text-red-600" },
+  agent_failure: { icon: AlertTriangle, label: "had an agent process failure", color: "text-red-600" },
   git_push_failed: { icon: GitBranch, label: "failed to push commits", color: "text-red-600" },
 }
 
@@ -84,6 +85,7 @@ const ACTION_LABELS: Record<string, string> = {
   sandbox_deleted: "Sandbox Deleted",
   daily_limit_reached: "Daily Limit Reached",
   llm_provider_error: "LLM Provider Error",
+  agent_failure: "Agent Failure",
   git_push_failed: "Push Failed",
 }
 

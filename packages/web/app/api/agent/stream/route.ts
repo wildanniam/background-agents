@@ -9,7 +9,8 @@ import {
   type AgentSnapshot,
 } from "@/lib/agent-session"
 import { prisma } from "@/lib/db/prisma"
-import { logLlmProviderError } from "@/lib/db/activity-log"
+import { logAgentFailure, logLlmProviderError } from "@/lib/db/activity-log"
+import { describeAgentFailure } from "@/lib/server/agent-failure"
 import { isAuthError, requireChatStreamAccess } from "@/lib/db/api-helpers"
 import { meterAssistantTurn } from "@/lib/server/token-metering"
 import { autoPushChat, type PushInfo } from "@/lib/git/auto-push"
@@ -106,6 +107,7 @@ export async function GET(req: Request) {
           turn,
           snapshot: snap,
           finalizationClaimId,
+          failure: finalizationClaimId && snap.status === "error" ? describeAgentFailure(snap) : undefined,
         })
         lastDbPersist = Date.now()
       }
@@ -213,6 +215,8 @@ export async function GET(req: Request) {
             }
             let pushInfo: PushInfo | undefined
             let uncommittedFilesCount: number | undefined
+            let failureAgent: string | undefined
+            let failureModel: string | null | undefined
             try {
             // A turn can end in "error" while its process is still alive — most
             // notably OpenCode, which on a retryable model error (rate/usage
@@ -233,6 +237,8 @@ export async function GET(req: Request) {
                       select: { agent: true, model: true },
                     })
                   : null
+                failureAgent = chatRow?.agent
+                failureModel = chatRow?.model
                 logLlmProviderError({
                   userId: auth.userId,
                   agent: chatRow?.agent,
@@ -315,6 +321,18 @@ export async function GET(req: Request) {
 
             // Now that the push is done, release the chat from "running".
             await persistSnapshot(lastSnap, finalizationClaimId)
+            if (lastSnap.status === "error") {
+              await logAgentFailure({
+                userId: auth.userId,
+                chatId: turn.chatId,
+                assistantMessageId: turn.assistantMessageId,
+                agent: failureAgent,
+                model: failureModel,
+                source: "stream",
+                error: lastSnap.error ?? "Unknown error",
+                errorKind: lastSnap.errorKind,
+              })
+            }
             } finally {
               // Release independently of message/push failures. The ownership
               // condition prevents an old finalizer from clearing a new run.

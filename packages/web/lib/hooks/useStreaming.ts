@@ -47,6 +47,13 @@ export function mergeMessages(existing: Message[], incoming: Message[]): Message
         messageMap.set(incomingMsg.id, incomingMsg)
       } else if (incomingLen === existingLen && incomingMsg.timestamp > existingMsg.timestamp) {
         messageMap.set(incomingMsg.id, incomingMsg)
+      } else if (incomingMsg.metadata?.failure && !existingMsg.metadata?.failure) {
+        // The server can finalize a turn without adding body text. Preserve
+        // the richer local output while accepting its durable failure state.
+        messageMap.set(incomingMsg.id, {
+          ...existingMsg,
+          metadata: { ...existingMsg.metadata, failure: incomingMsg.metadata.failure },
+        })
       }
     }
   }
@@ -248,7 +255,10 @@ export function useStreaming(options: UseStreamingOptions = {}) {
 
           // Fetch any new messages created by the backend (delta sync)
           try {
-            const chatData = await fetchChat(chatId, { afterMessageId: assistantMessageId })
+            const chatData = await fetchChat(
+              chatId,
+              data.status === "error" ? undefined : { afterMessageId: assistantMessageId }
+            )
             const incomingMessages = chatData.messages.map(toMessageType)
             updateChatsCache((old) =>
               old.map((c) => {

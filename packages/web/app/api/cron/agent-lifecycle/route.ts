@@ -196,7 +196,7 @@ export async function GET(req: Request) {
                 error,
                 errorKind,
               })
-              await markChatError(chat, error, daytona, snapshot.sessionId)
+              await markChatError(chat, error, daytona, snapshot.sessionId, snapshot)
             },
           }
         )

@@ -12,6 +12,9 @@ import { autoPushChat } from "@/lib/git/auto-push"
 import { refreshUncommittedFilesWarning } from "@/lib/server/uncommitted-files-warning"
 import type { ChatWithMessages } from "./types"
 import { claimTurnFinalization, releaseTurn, type ActiveTurn } from "@/lib/server/turn-ownership"
+import { persistAgentSnapshot } from "@/app/api/agent/stream/_lib/persist-snapshot"
+import { describeAgentFailure } from "@/lib/server/agent-failure"
+import { logAgentFailure } from "@/lib/db/activity-log"
 
 // =============================================================================
 // Interactive Chat Finalization
@@ -26,6 +29,7 @@ type DyingChat = {
   id: string
   userId: string
   agent: string
+  model?: string | null
   sandboxId: string | null
   /** The persisted agent-session resume pointer, used as a fallback id. */
   sessionId: string | null
@@ -134,7 +138,8 @@ export async function markChatError(
    * chat row cannot supply it: Chat.backgroundSessionId is the Daytona handle,
    * a different namespace entirely. Without this the turn cannot be billed.
    */
-  agentSessionId?: string
+  agentSessionId?: string,
+  snapshot?: AgentSnapshot
 ) {
   const turn = activeTurn(chat)
   if (!turn) return
@@ -156,18 +161,34 @@ export async function markChatError(
     daytona,
   })
 
-  // Keep the old turn's error row in place before it becomes possible to
-  // start a new turn. Otherwise a quick retry can put this message after the
-  // next user's prompt and make the transcript look like a shifted answer.
-  await prisma.message.create({
-    data: {
+  if (snapshot) {
+    // Preserve partial output and attach the failure to its original turn.
+    await persistAgentSnapshot({
+      prisma, turn, snapshot, finalizationClaimId: claimId,
+      failure: describeAgentFailure(snapshot),
+    })
+    await logAgentFailure({
+      userId: chat.userId,
       chatId: chat.id,
-      role: "assistant",
-      content: `Agent stopped: ${reason}`,
-      timestamp: BigInt(Date.now()),
-      isError: true,
-    },
-  })
+      assistantMessageId: turn.assistantMessageId,
+      agent: chat.agent,
+      model: chat.model,
+      source: "cron-interactive",
+      error: reason,
+      errorKind: snapshot.errorKind,
+    })
+  } else {
+    // Timeouts and credit stops retain their existing explicit error message.
+    await prisma.message.create({
+      data: {
+        chatId: chat.id,
+        role: "assistant",
+        content: `Agent stopped: ${reason}`,
+        timestamp: BigInt(Date.now()),
+        isError: true,
+      },
+    })
+  }
 
   } finally {
     // Metering or message persistence can fail. Never strand the chat.

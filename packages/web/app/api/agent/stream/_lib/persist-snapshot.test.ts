@@ -11,7 +11,7 @@ function snapshot(overrides: Partial<AgentSnapshot> = {}): AgentSnapshot {
 }
 
 function makeClient(owned = true) {
-  const message = { update: vi.fn().mockResolvedValue({}) }
+  const message = { update: vi.fn().mockResolvedValue({}), findUnique: vi.fn().mockResolvedValue({ metadata: { pool: "shared" } }) }
   const chat = { updateMany: vi.fn().mockResolvedValue({ count: owned ? 1 : 0 }) }
   const client = {
     chat,
@@ -57,6 +57,19 @@ describe("persistAgentSnapshot", () => {
     const { client, message } = makeClient()
     await persistAgentSnapshot({ prisma: client, turn, snapshot: snapshot({ content: `a${NUL}b`, toolCalls: [{ tool: "shell", summary: `x${NUL}y` }] }) })
     expect(message.update.mock.calls[0][0].data).toMatchObject({ content: "ab", toolCalls: [{ tool: "shell", summary: "xy" }] })
+  })
+
+  it("keeps partial output and existing metadata when persisting a failed turn", async () => {
+    const { client, message } = makeClient()
+    await persistAgentSnapshot({
+      prisma: client, turn, finalizationClaimId: "owner-1",
+      snapshot: snapshot({ status: "error", content: "partial answer" }),
+      failure: { kind: "crash", message: "Agent process exited before completing." },
+    })
+    expect(message.update.mock.calls[0][0].data).toMatchObject({
+      content: "partial answer",
+      metadata: { pool: "shared", failure: { kind: "crash", message: "Agent process exited before completing." } },
+    })
   })
 })
 
